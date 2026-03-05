@@ -311,3 +311,68 @@ def plot_all(mag, swia_mom, swea, swia_flux, static, start, end):
     ax[9].set_xlabel('Date/Time')
     plt.margins(x=0.02)
     plt.show()
+
+
+# making a heavy ion function to plot O+ and O2+ from STATIC data, as these are often of interest when looking at atmospheric escape processes.
+def plot_heavy_ions_helper(fig, ax, i, static, start, end):
+    """
+    Helper to plot a combined O+ and O2+ spectrogram in a single panel.
+    """
+    start_time = np.datetime64(start)
+    end_time = np.datetime64(end)
+
+    static_start = find_nearest_time(static['times'], start_time)
+    static_end = find_nearest_time(static['times'], end_time)
+    
+    # Extract species data using your process_data script
+    _, oxygen, o2, energy_grid = static_spectrogram(static, static_start, static_end)
+    
+    # Combine O+ and O2+ fluxes into one 'heavy' array
+    # We use nan_to_num to ensure NaNs don't break the addition
+    heavy_flux = np.where(np.isnan(oxygen) & np.isnan(o2), np.nan, 
+                          np.nan_to_num(oxygen) + np.nan_to_num(o2))
+    
+    swp_ind = static['sweep_index']
+    unique_sweeps = list(np.unique(swp_ind[static_start:static_end]))
+    current_swp = swp_ind[static_start]
+    swp_index = unique_sweeps.index(current_swp)
+    start_index = 0
+    static_time_slice = static['times'][static_start:static_end]
+
+    # Iterate through time to handle changing energy sweep tables
+    for k in range(static_end - static_start):
+        if swp_ind[static_start + k] != current_swp or k == (static_end - static_start - 1):
+            plot_end = k if swp_ind[static_start + k] != current_swp else k + 1
+            
+            # Extract the 32-bin energy window for the current sweep index
+            # Logic derived from static_spectrogram in process_data.py
+            e_window = energy_grid[swp_index*32:(swp_index+1)*32]
+            f_window = np.transpose(heavy_flux[start_index:plot_end, swp_index*32:(swp_index+1)*32])
+            
+            p_heavy = ax[i].pcolormesh(static_time_slice[start_index:plot_end], 
+                                      e_window, f_window, 
+                                      norm=LogNorm(), shading='auto', snap=True)
+            
+            # Set color limits based on the maximum heavy ion flux found
+            p_heavy.set_clim(vmax=np.nanmax(heavy_flux))
+
+            if swp_ind[static_start + k] != current_swp:
+                current_swp = swp_ind[static_start + k]
+                swp_index = unique_sweeps.index(current_swp)
+                start_index = k
+
+    # Formatting the panel
+    ax[i].set_yscale('log')
+    ax[i].set_ylabel(r'STATIC $O^+ + O_2^+$' '\n Energy (eV)')
+    cb = fig.colorbar(p_heavy, ax=ax[i], pad=0.01)
+    cb.set_label(r'EFlux (eV/(eV $cm^{2}$ sr s))')
+
+def plot_heavy_ions_only(static, start, end):
+    """
+    Main function to plot just the heavy ion panel.
+    """
+    fig, ax = plt.subplots(1, 1, figsize=(10, 4), constrained_layout=True)
+    # We pass [ax] as a list so the helper can use index i
+    plot_heavy_ions_helper(fig, [ax], 0, static, start, end)
+    ax.set_xlabel('Date/Time')
+    plt.show()
